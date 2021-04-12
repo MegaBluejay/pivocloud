@@ -1,0 +1,17 @@
+package command;
+
+public enum CommandType {
+    HELP,
+    INFO,
+    SHOW,
+    INSERT,
+    UPDATE,
+    REMOVE_KEY,
+    CLEAR,
+    REMOVE_LOWER,
+    REPLACE_IF_LOWER,
+    REMOVE_LOWER_KEY,
+    GROUP_COUNTING_BY_CREATION_DATE,
+    FILTER_GREATER_THAN_CATEGORY,
+    PRINT_ASCENDING
+}
