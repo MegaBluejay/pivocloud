@@ -1,6 +1,8 @@
 package marine;
 
-public class Coordinates {
+import java.io.Serializable;
+
+public class Coordinates implements Serializable {
     public Coordinates(double x, Double y) {
         this.x = x;
         this.y = y;

@@ -19,17 +19,12 @@ class MarineInfo {
 }
 
 public class MarineManager {
-    private Map<Long, SpaceMarine> marines = new HashMap<>();
-
-    private String saveFilePath = System.getenv("FILE");
+    private Map<Long, SpaceMarine> marines;
 
     private long maxid = 0;
 
-    private static String quotedToString(Object o) {
-        if (o == null) {
-            return "null";
-        }
-        return "\"" + o + "\"";
+    public MarineManager(Map<Long, SpaceMarine> marines) {
+        this.marines = marines;
     }
 
     public MarineInfo info() {
@@ -40,8 +35,8 @@ public class MarineManager {
         return new MarineInfo(type, n, latestCreatedDate);
     }
 
-    public List<SpaceMarine> list() {
-        return new ArrayList<>(marines.values());
+    public List<Map.Entry<Long, SpaceMarine>> list() {
+        return new ArrayList<>(marines.entrySet());
     }
 
     public boolean insert(Long key, SpaceMarine marine) {
@@ -112,14 +107,15 @@ public class MarineManager {
                         SpaceMarine::getCreationDate, Collectors.counting()));
     }
 
-    public List<SpaceMarine> filterGreaterThanCategory(AstartesCategory category) {
-        return marines.values().stream()
-                .filter(m -> m.getCategory() != null && m.getCategory().ordinal() > category.ordinal())
-                .collect(Collectors.toList());
+    public List<Map.Entry<Long, SpaceMarine>> filterGreaterThanCategory(AstartesCategory category) {
+        return marines.entrySet().stream()
+                .filter(e -> {
+                    AstartesCategory cat = e.getValue().getCategory();
+                    return cat != null && cat.ordinal() > category.ordinal();
+                }).collect(Collectors.toList());
     }
 
-    public List<SpaceMarine> ascending() {
-        return marines.values().stream()
-                .sorted().collect(Collectors.toList());
+    public List<Map.Entry<Long, SpaceMarine>> ascending() {
+        return marines.entrySet().stream().sorted(Map.Entry.comparingByValue()).collect(Collectors.toList());
     }
 }

@@ -4,8 +4,8 @@ import command.*;
 import marine.*;
 
 import java.io.*;
-import java.net.ConnectException;
 import java.net.Socket;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Date;
@@ -20,9 +20,11 @@ public class Client {
     boolean exit = false;
     boolean inScript = false;
 
+    String host;
+    int port;
     Socket socket;
-    DataInputStream is;
-    DataOutputStream os;
+    DataInputStream dis;
+    OutputStream os;
 
     private boolean simpleZeroArg(String[] args, String commandName) {
         if (args.length > 1) {
@@ -49,10 +51,10 @@ public class Client {
         return Optional.empty();
     }
 
-    private static <T> T readObject(Scanner scanner, boolean quiet, Function<String, T> conv, Predicate<T> isValid, String promptMessage, String errorMessage, boolean canBeEmpty) {
+    public static <T> T readObject(Scanner scanner, boolean quiet, Function<String, T> conv, Predicate<T> isValid, String promptMessage, String errorMessage, boolean canBeEmpty) {
         while (true) {
             if (!quiet) {
-                System.out.println(promptMessage);
+                System.out.print(promptMessage);
             }
             String line = scanner.nextLine();
             if (canBeEmpty && line.isEmpty()) {
@@ -322,16 +324,50 @@ public class Client {
         return Optional.empty();
     }
 
-    private String doCommand(Command command) throws IOException {
+    private String doCommand(Command command) throws IOException, InterruptedException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        for (int i = 0; i < 4; i++) {
+            baos.write(0);
+        }
         ObjectOutputStream oos = new ObjectOutputStream(baos);
         oos.writeObject(command);
-        os.writeUTF(baos.toString());
-        String output = is.readUTF();
-        if (!output.isEmpty()) {
-            return output;
+        oos.flush();
+        ByteBuffer bb = ByteBuffer.wrap(baos.toByteArray());
+        bb.putInt(0, baos.size()-4);
+
+        String res;
+        while (true) {
+            try {
+                socket.getOutputStream().write(bb.array());
+                socket.getOutputStream().flush();
+                res = dis.readUTF();
+                break;
+            } catch (IOException e) {
+                connect();
+            }
         }
-        return null;
+        if (res.isEmpty())
+            return null;
+        return res;
+    }
+
+    private void connect() throws InterruptedException, IOException {
+        boolean firstTry = true;
+        while (true) {
+            try {
+                socket = new Socket(host, port);
+                break;
+            } catch (IOException e) {
+                System.out.println("error, reconnecting");
+                Thread.sleep(1000);
+                firstTry = false;
+            }
+        }
+        if (!firstTry) {
+            System.out.println("connected");
+        }
+        os = socket.getOutputStream();
+        dis = new DataInputStream(socket.getInputStream());
     }
 
     private void work(Scanner scanner, boolean quiet) {
@@ -341,27 +377,24 @@ public class Client {
                 try {
                     return Optional.ofNullable(doCommand(c));
                 } catch (IOException e) {
-                    System.out.println("io error");
+                    System.out.println("weird io error");
+                    return Optional.empty();
+                } catch (InterruptedException ignored) {
                     return Optional.empty();
                 }
             }).ifPresent(System.out::print);
         }
     }
 
-    private Client(String serverIP, int port) throws IOException {
-        while (true) {
-            try {
-                socket = new Socket(serverIP, port);
-                break;
-            } catch (ConnectException ignored) {}
-        }
-
-        is = new DataInputStream(socket.getInputStream());
-        os = new DataOutputStream(socket.getOutputStream());
+    private Client(String host, int port) {
+        this.host = host;
+        this.port = port;
     }
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         Client client = new Client("localhost", 3345);
+
+        client.connect();
 
         client.work(new Scanner(System.in), false);
     }
