@@ -56,17 +56,22 @@ public class Client {
             if (!quiet) {
                 System.out.print(promptMessage);
             }
-            String line = scanner.nextLine();
-            if (canBeEmpty && line.isEmpty()) {
-                return null;
-            }
-            try {
-                T t = conv.apply(line);
-                if (isValid.test(t)) {
-                    return t;
+            if (scanner.hasNextLine()) {
+                String line = scanner.nextLine();
+                if (canBeEmpty && line.isEmpty()) {
+                    return null;
                 }
-            } catch (Exception ignored) {}
-            System.out.println(errorMessage);
+                try {
+                    T t = conv.apply(line);
+                    if (isValid.test(t)) {
+                        return t;
+                    }
+                } catch (Exception ignored) {
+                }
+                System.out.println(errorMessage);
+            } else {
+                System.exit(0);
+            }
         }
     }
 
@@ -202,124 +207,121 @@ public class Client {
         if (!quiet) {
             System.out.print("> ");
         }
-        String line = scanner.nextLine();
-        String[] args = line.trim().split(" +");
-        if (args.length > 0) {
-            String command = args[0];
-            if (command.equals("help")) {
-                System.out.println("all args written as {arg} must be specified on further lines");
-                System.out.println("help print help");
-                System.out.println("info print info about current state of marines");
-                System.out.println("show print all marines");
-                System.out.println("insert key {marine} add new marine with given key");
-                System.out.println("update id {marine} update marine with given id");
-                System.out.println("remove_key key delete marine with given key");
-                System.out.println("clear delete all marines");
-                System.out.println("save save marines to file");
-                System.out.println("execute_script file_name execute script");
-                System.out.println("exit end execution");
-                System.out.println("remove_lower {marine} delete all marines with health lower than the one given");
-                System.out.println("replace_if_lower key {marine} replace marine with key with given one if the new health is lower than the old");
-                System.out.println("remove_lower_key key delete all marines with key lower than given");
-                System.out.println("group_counting_by_creation_date print number of marines with each creation date");
-                System.out.println("filter_greater_than_category {category} print marines with categories higher than the one given");
-                System.out.println("print_ascending print all marines sorted by health");
-                return Optional.empty();
-            } else if (command.equals("info")) {
-                return Optional.of(new InfoCommand());
-            } else if (command.equals("show")) {
-                return Optional.of(new ShowCommand());
-            } else if (command.equals("insert")) {
-                return simpleSingleArg(args,
-                        Long::parseLong,
-                        "insert",
-                        "key").map(k -> new InsertCommand(k, readMarine(scanner, quiet)));
-            } else if (command.equals("update")) {
-                return simpleSingleArg(args,
-                        Long::parseLong,
-                        "update",
-                        "id").map(id -> new UpdateCommand(id, readMarine(scanner, quiet)));
-            } else if (command.equals("remove_key")) {
-                return simpleSingleArg(args,
-                        Long::parseLong,
-                        "remove_key",
-                        "key").map(k -> new RemoveKeyCommand(k));
-            } else if (command.equals("clear")) {
-                return Optional.of(new ClearCommand());
-            } else if (command.equals("execute_script")) {
-                if (args.length == 1) {
-                    System.out.println("file required");
-                }
-                else if (args.length > 2) {
-                    System.out.println("execute_script only takes 1 argument");
-                }
-                else if (inScript) {
-                    System.out.println("script recursion not allowed, skipping execute_script");
-                }
-                else {
-                    File scriptFile = new File(args[1]);
-                    try {
-                        if (Files.isReadable(scriptFile.toPath())) {
-                            Scanner scriptScanner = new Scanner(new FileInputStream(scriptFile));
-                            inScript = true;
-                            work(scriptScanner, true);
-                            inScript = false;
+        if (scanner.hasNextLine()) {
+            String line = scanner.nextLine();
+            String[] args = line.trim().split(" +");
+            if (args.length > 0) {
+                String command = args[0];
+                if (command.equals("help")) {
+                    System.out.println("all args written as {arg} must be specified on further lines");
+                    System.out.println("help print help");
+                    System.out.println("info print info about current state of marines");
+                    System.out.println("show print all marines");
+                    System.out.println("insert key {marine} add new marine with given key");
+                    System.out.println("update id {marine} update marine with given id");
+                    System.out.println("remove_key key delete marine with given key");
+                    System.out.println("clear delete all marines");
+                    System.out.println("execute_script file_name execute script");
+                    System.out.println("exit end execution");
+                    System.out.println("remove_lower {marine} delete all marines with health lower than the one given");
+                    System.out.println("replace_if_lower key {marine} replace marine with key with given one if the new health is lower than the old");
+                    System.out.println("remove_lower_key key delete all marines with key lower than given");
+                    System.out.println("group_counting_by_creation_date print number of marines with each creation date");
+                    System.out.println("filter_greater_than_category {category} print marines with categories higher than the one given");
+                    System.out.println("print_ascending print all marines sorted by health");
+                    return Optional.empty();
+                } else if (command.equals("info")) {
+                    return Optional.of(new InfoCommand());
+                } else if (command.equals("show")) {
+                    return Optional.of(new ShowCommand());
+                } else if (command.equals("insert")) {
+                    return simpleSingleArg(args,
+                            Long::parseLong,
+                            "insert",
+                            "key").map(k -> new InsertCommand(k, readMarine(scanner, quiet)));
+                } else if (command.equals("update")) {
+                    return simpleSingleArg(args,
+                            Long::parseLong,
+                            "update",
+                            "id").map(id -> new UpdateCommand(id, readMarine(scanner, quiet)));
+                } else if (command.equals("remove_key")) {
+                    return simpleSingleArg(args,
+                            Long::parseLong,
+                            "remove_key",
+                            "key").map(k -> new RemoveKeyCommand(k));
+                } else if (command.equals("clear")) {
+                    return Optional.of(new ClearCommand());
+                } else if (command.equals("execute_script")) {
+                    if (args.length == 1) {
+                        System.out.println("file required");
+                    } else if (args.length > 2) {
+                        System.out.println("execute_script only takes 1 argument");
+                    } else if (inScript) {
+                        System.out.println("script recursion not allowed, skipping execute_script");
+                    } else {
+                        File scriptFile = new File(args[1]);
+                        try {
+                            if (Files.isReadable(scriptFile.toPath())) {
+                                Scanner scriptScanner = new Scanner(new FileInputStream(scriptFile));
+                                inScript = true;
+                                work(scriptScanner, true);
+                                inScript = false;
+                            } else {
+                                System.out.println("file not readable");
+                            }
+                        } catch (FileNotFoundException e) {
+                            System.out.println("file not found");
                         }
-                        else {
-                            System.out.println("file not readable");
-                        }
-                    } catch (FileNotFoundException e) {
-                        System.out.println("file not found");
                     }
-                }
-                return Optional.empty();
-            } else if (command.equals("exit")) {
-                exit = true;
-                return Optional.empty();
-            } else if (command.equals("remove_lower")) {
-                if (simpleZeroArg(args, "remove_lower")) {
-                    return Optional.of(new RemoveLowerCommand(readMarine(scanner, quiet)));
-                }
-                else {
+                    return Optional.empty();
+                } else if (command.equals("exit")) {
+                    exit = true;
+                    return Optional.empty();
+                } else if (command.equals("remove_lower")) {
+                    if (simpleZeroArg(args, "remove_lower")) {
+                        return Optional.of(new RemoveLowerCommand(readMarine(scanner, quiet)));
+                    } else {
+                        return Optional.empty();
+                    }
+                } else if (command.equals("replace_if_lower")) {
+                    return simpleSingleArg(args,
+                            Long::parseLong,
+                            "replace_if_lower",
+                            "key").map(k -> new ReplaceIfLowerCommand(k, readMarine(scanner, quiet)));
+                } else if (command.equals("remove_lower_key")) {
+                    return simpleSingleArg(args,
+                            Long::parseLong,
+                            "remove_lower_key",
+                            "key").map(k -> new RemoveLowerKeyCommand(k));
+                } else if (command.equals("group_counting_by_creation_date")) {
+                    return Optional.of(new GroupCountingByCreationDateCommand());
+                } else if (command.equals("filter_greater_than_category")) {
+                    if (args.length > 1) {
+                        System.out.println("filter_greater_than_category doesn't take any same-line arguments");
+                        return Optional.empty();
+                    } else {
+                        AstartesCategory category = readObject(
+                                scanner,
+                                quiet,
+                                AstartesCategory::valueOf,
+                                c -> true,
+                                "Enter category (one of [" +
+                                        Arrays.stream(AstartesCategory.values()).map(AstartesCategory::toString)
+                                                .collect(Collectors.joining(", ")) + "]): ",
+                                "invalid category",
+                                false
+                        );
+                        return Optional.of(new FilterGreaterThanCategoryCommand(category));
+                    }
+                } else if (command.equals("print_ascending")) {
+                    return Optional.of(new PrintAscendingCommand());
+                } else {
+                    System.out.println("unknown command");
                     return Optional.empty();
                 }
-            } else if (command.equals("replace_if_lower")) {
-                return simpleSingleArg(args,
-                        Long::parseLong,
-                        "replace_if_lower",
-                        "key").map(k -> new ReplaceIfLowerCommand(k, readMarine(scanner, quiet)));
-            } else if (command.equals("remove_lower_key")) {
-                return simpleSingleArg(args,
-                        Long::parseLong,
-                        "remove_lower_key",
-                        "key").map(k -> new RemoveLowerKeyCommand(k));
-            } else if (command.equals("group_counting_by_creation_date")) {
-                return Optional.of(new GroupCountingByCreationDateCommand());
-            } else if (command.equals("filter_greater_than_category")) {
-                if (args.length > 1) {
-                    System.out.println("filter_greater_than_category doesn't take any same-line arguments");
-                    return Optional.empty();
-                }
-                else {
-                    AstartesCategory category = readObject(
-                            scanner,
-                            quiet,
-                            AstartesCategory::valueOf,
-                            c -> true,
-                            "Enter category (one of [" +
-                                    Arrays.stream(AstartesCategory.values()).map(AstartesCategory::toString)
-                                            .collect(Collectors.joining(", ")) + "]): ",
-                            "invalid category",
-                            false
-                    );
-                    return Optional.of(new FilterGreaterThanCategoryCommand(category));
-                }
-            } else if (command.equals("print_ascending")) {
-                return Optional.of(new PrintAscendingCommand());
-            } else {
-                System.out.println("unknown command");
-                return Optional.empty();
             }
+        } else {
+            exit = true;
         }
         return Optional.empty();
     }

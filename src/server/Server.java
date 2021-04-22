@@ -322,6 +322,7 @@ public class Server {
     private void work() throws IOException, ClassNotFoundException {
         ByteBuffer shortBuffer = ByteBuffer.allocate(2);
         ByteBuffer intBuffer = ByteBuffer.allocate(4);
+
         while (true) {
             if (System.in.available() != 0) {
                 String line = localScanner.nextLine().trim();
