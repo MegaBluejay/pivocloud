@@ -1,4 +1,4 @@
-package command;
+package message;
 
 import marine.SpaceMarine;
 import server.Server;

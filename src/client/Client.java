@@ -1,12 +1,15 @@
 package client;
 
-import command.*;
+import message.*;
 import marine.*;
 
 import java.io.*;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.Optional;
@@ -25,6 +28,77 @@ public class Client {
     Socket socket;
     DataInputStream dis;
     OutputStream os;
+    RequestFactory requestFactory = null;
+
+    private static String md2(String password) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD2");
+            byte[] messageDigest = md.digest(password.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(messageDigest.length*2);
+            for(byte b: messageDigest) {
+                builder.append(String.format("%02x", b));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+            throw new RuntimeException();
+        }
+    }
+
+    private void login(Scanner scanner, boolean quiet) {
+        while (true) {
+            Boolean needRegister = readObject(
+                    scanner,
+                    quiet,
+                    s -> {
+                        s = s.toLowerCase();
+                        if (s.equals("l") || s.isEmpty()) {
+                            return false;
+                        } else if (s.equals("r")) {
+                            return true;
+                        } else {
+                            throw new IllegalArgumentException();
+                        }
+                    },
+                    nr -> true,
+                    "Do you want to login or register? ([L]/r) ",
+                    "enter 'l', 'r', or leave empty for default",
+                    false
+            );
+
+            String user = readObject(
+                    scanner,
+                    quiet,
+                    s -> s,
+                    u -> true,
+                    "Enter username: ",
+                    "",
+                    false
+            );
+            String password = readObject(
+                    scanner,
+                    quiet,
+                    s -> s,
+                    p -> true,
+                    "Enter password: ",
+                    "",
+                    false
+            );
+            String passHash = md2(password);
+
+            Response response;
+            if (needRegister) {
+                response = getResonse(new RegisterRequest(user, passHash));
+            } else {
+                response = getResonse(new TestRequest(user, passHash));
+            }
+            printResonse(response);
+            if (response.success) {
+                requestFactory = new RequestFactory(user, passHash);
+                return;
+            }
+        }
+    }
 
     private boolean simpleZeroArg(String[] args, String commandName) {
         if (args.length > 1) {
@@ -248,7 +322,7 @@ public class Client {
                     return simpleSingleArg(args,
                             Long::parseLong,
                             "remove_key",
-                            "key").map(k -> new RemoveKeyCommand(k));
+                            "key").map(RemoveKeyCommand::new);
                 } else if (command.equals("clear")) {
                     return Optional.of(new ClearCommand());
                 } else if (command.equals("execute_script")) {
@@ -292,7 +366,7 @@ public class Client {
                     return simpleSingleArg(args,
                             Long::parseLong,
                             "remove_lower_key",
-                            "key").map(k -> new RemoveLowerKeyCommand(k));
+                            "key").map(RemoveLowerKeyCommand::new);
                 } else if (command.equals("group_counting_by_creation_date")) {
                     return Optional.of(new GroupCountingByCreationDateCommand());
                 } else if (command.equals("filter_greater_than_category")) {
@@ -326,77 +400,80 @@ public class Client {
         return Optional.empty();
     }
 
-    private String doCommand(Command command) throws IOException, InterruptedException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        for (int i = 0; i < 4; i++) {
-            baos.write(0);
+    private void printResonse(Response response) {
+        if (!response.success) {
+            System.out.println("bad credentials");
         }
-        ObjectOutputStream oos = new ObjectOutputStream(baos);
-        oos.writeObject(command);
-        oos.flush();
-        ByteBuffer bb = ByteBuffer.wrap(baos.toByteArray());
-        bb.putInt(0, baos.size()-4);
+        else if (!response.response.isEmpty()) {
+            System.out.print(response.response);
+        }
+    }
 
-        String res;
+    private Response getResonse(Request request) {
         while (true) {
             try {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                for (int i = 0; i < 4; i++) {
+                    baos.write(0);
+                }
+                ObjectOutputStream oos = new ObjectOutputStream(baos);
+                oos.writeObject(request);
+                oos.flush();
+                ByteBuffer bb = ByteBuffer.wrap(baos.toByteArray());
+                bb.putInt(0, baos.size()-4);
+
+                String res;
+                boolean success;
+
                 socket.getOutputStream().write(bb.array());
                 socket.getOutputStream().flush();
+                success = dis.readBoolean();
                 res = dis.readUTF();
-                break;
+                return new Response(success, res);
             } catch (IOException e) {
                 connect();
             }
         }
-        if (res.isEmpty())
-            return null;
-        return res;
     }
 
-    private void connect() throws InterruptedException, IOException {
+    private void connect() {
         boolean firstTry = true;
         while (true) {
             try {
                 socket = new Socket(host, port);
+                os = socket.getOutputStream();
+                dis = new DataInputStream(socket.getInputStream());
+                if (!firstTry) {
+                    System.out.println("connected");
+                }
                 break;
             } catch (IOException e) {
                 System.out.println("error, reconnecting");
-                Thread.sleep(1000);
+                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
                 firstTry = false;
             }
         }
-        if (!firstTry) {
-            System.out.println("connected");
-        }
-        os = socket.getOutputStream();
-        dis = new DataInputStream(socket.getInputStream());
     }
 
     private void work(Scanner scanner, boolean quiet) {
+        if (requestFactory == null) {
+            login(scanner, quiet);
+        }
         while (!exit) {
             Optional<Command> mbCommand = readCommand(scanner, quiet);
-            mbCommand.flatMap(c -> {
-                try {
-                    return Optional.ofNullable(doCommand(c));
-                } catch (IOException e) {
-                    System.out.println("weird io error");
-                    return Optional.empty();
-                } catch (InterruptedException ignored) {
-                    return Optional.empty();
-                }
-            }).ifPresent(System.out::print);
+            mbCommand.map(requestFactory::request)
+                    .map(this::getResonse).ifPresent(this::printResonse);
         }
     }
 
     private Client(String host, int port) {
         this.host = host;
         this.port = port;
+        connect();
     }
 
-    public static void main(String[] args) throws IOException, InterruptedException {
+    public static void main(String[] args) throws IOException {
         Client client = new Client("localhost", 3345);
-
-        client.connect();
 
         client.work(new Scanner(System.in), false);
     }

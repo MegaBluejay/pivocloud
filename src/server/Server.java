@@ -1,6 +1,6 @@
 package server;
 
-import command.*;
+import message.*;
 import marine.*;
 
 import java.io.*;
@@ -24,6 +24,7 @@ import static client.Client.readObject;
 class ClientState {
     int toRead = -1;
     boolean messageReady = false;
+    boolean success = true;
     ByteBuffer inBuffer;
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
     PrintStream out = new PrintStream(baos);
@@ -322,6 +323,7 @@ public class Server {
     private void work() throws IOException, ClassNotFoundException {
         ByteBuffer shortBuffer = ByteBuffer.allocate(2);
         ByteBuffer intBuffer = ByteBuffer.allocate(4);
+        ByteBuffer boolBuffer = ByteBuffer.allocate(1);
 
         while (true) {
             if (System.in.available() != 0) {
@@ -381,9 +383,9 @@ public class Server {
                         if (state.inBuffer.position() == state.toRead) {
                             state.inBuffer.flip();
                             ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(state.inBuffer.array()));
-                            Command command = (Command) ois.readObject();
+                            Request request = (Request) ois.readObject();
                             state.toRead = -1;
-                            command.execute(this);
+                            request.handle(this);
                             send();
                         }
                     }
@@ -393,6 +395,10 @@ public class Server {
                     state = (ClientState) key.attachment();
                     if (state.messageReady) {
                         SocketChannel client = (SocketChannel) key.channel();
+                        boolBuffer.put((byte) (state.success ? 1 : 0));
+                        boolBuffer.flip();
+                        client.write(boolBuffer);
+                        boolBuffer.clear();
                         String message = state.baos.toString();
                         ByteBuffer bb = StandardCharsets.UTF_8.encode(message);
                         shortBuffer.putShort((short) bb.remaining());
@@ -403,6 +409,7 @@ public class Server {
                         state.messageReady = false;
                         state.baos = new ByteArrayOutputStream();
                         state.out = new PrintStream(state.baos);
+                        state.success = true;
                     }
                 }
             }
@@ -447,7 +454,32 @@ public class Server {
     private void printMarines(List<Map.Entry<Long, SpaceMarine>> entries) {
         interDo(entries, this::printMarine, System.out::println);
     }
-    
+
+    public void handleNormalRequest(NormalRequest request) {
+        if (users.containsKey(request.user) && users.get(request.user).equals(request.passHash)) {
+            request.command.execute(this);
+        } else {
+            state.success = false;
+        }
+    }
+
+    public void handleTestRequest(TestRequest request) {
+        if (!(users.containsKey(request.user) && users.get(request.user).equals(request.passHash))) {
+            state.success = false;
+        }
+    }
+
+    Map<String, String> users = new HashMap<>();
+    public void handleRegisterRequest(RegisterRequest request) {
+        if (users.containsKey(request.user)) {
+            state.out.println("username already taken");
+            state.success = false;
+        } else {
+            users.put(request.user, request.passHash);
+            state.out.println("registered");
+        }
+    }
+
     public void executeClear(ClearCommand command) {
         manager.clear();
     }
