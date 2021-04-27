@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="org.postgresql:postgresql:42.2.20" type="repository">
+    <properties maven-id="org.postgresql:postgresql:42.2.20" />
+    <CLASSES>
+      <root url="jar://$MAVEN_REPOSITORY$/org/postgresql/postgresql/42.2.20/postgresql-42.2.20.jar!/" />
+      <root url="jar://$MAVEN_REPOSITORY$/org/checkerframework/checker-qual/3.5.0/checker-qual-3.5.0.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
