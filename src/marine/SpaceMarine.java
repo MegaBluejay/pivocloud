@@ -4,10 +4,19 @@ import java.io.Serializable;
 import java.util.Date;
 
 public class SpaceMarine implements Comparable<SpaceMarine>, Serializable {
+    private String owner;
     private Long id; //Поле не может быть null, Значение поля должно быть больше 0, Значение этого поля должно быть уникальным, Значение этого поля должно генерироваться автоматически
     private String name; //Поле не может быть null, Строка не может быть пустой
     private Coordinates coordinates; //Поле не может быть null
     private java.util.Date creationDate; //Поле не может быть null, Значение этого поля должно генерироваться автоматически
+
+    public String getOwner() {
+        return owner;
+    }
+
+    public void setOwner(String owner) {
+        this.owner = owner;
+    }
 
     public Long getId() {
         return id;
@@ -87,7 +96,7 @@ public class SpaceMarine implements Comparable<SpaceMarine>, Serializable {
     private MeleeWeapon meleeWeapon; //Поле не может быть null
     private Chapter chapter; //Поле может быть null
 
-    public SpaceMarine(Long id, String name, Coordinates coordinates, Date creationDate, Float health, AstartesCategory category, Weapon weaponType, MeleeWeapon meleeWeapon, Chapter chapter) {
+    public SpaceMarine(Long id, String name, Coordinates coordinates, Date creationDate, Float health, AstartesCategory category, Weapon weaponType, MeleeWeapon meleeWeapon, Chapter chapter, String owner) {
         this.id = id;
         this.name = name;
         this.coordinates = coordinates;
@@ -97,6 +106,7 @@ public class SpaceMarine implements Comparable<SpaceMarine>, Serializable {
         this.weaponType = weaponType;
         this.meleeWeapon = meleeWeapon;
         this.chapter = chapter;
+        this.owner = owner;
     }
 
     @Override

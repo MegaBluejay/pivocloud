@@ -18,13 +18,29 @@ class MarineInfo {
     }
 }
 
+enum ManagerAnswer {
+    OK,
+    BAD_OP,
+    BAD_OWNER
+}
+
 public class MarineManager {
     private Map<Long, SpaceMarine> marines;
 
     private long maxid = 0;
 
+    private String currentUser;
+
     public MarineManager(Map<Long, SpaceMarine> marines) {
         this.marines = marines;
+    }
+
+    public void setCurrentUser(String user) {
+        this.currentUser = user;
+    }
+
+    private boolean isCurrentUsers(SpaceMarine marine) {
+        return marine.getOwner().equals(currentUser);
     }
 
     public MarineInfo info() {
@@ -39,65 +55,78 @@ public class MarineManager {
         return new ArrayList<>(marines.entrySet());
     }
 
-    public boolean insert(Long key, SpaceMarine marine) {
+    public ManagerAnswer insert(Long key, SpaceMarine marine) {
         if (marines.containsKey(key)) {
-            return false;
+            return ManagerAnswer.BAD_OP;
         }
         marine.setId(++maxid);
         marine.setCreationDate(new Date());
         marines.put(key, marine);
-        return true;
+        return ManagerAnswer.OK;
     }
 
-    public boolean update(Long id, SpaceMarine marine) {
+    public ManagerAnswer update(Long id, SpaceMarine marine) {
         Optional<Long> mbKey = marines.keySet()
                 .stream().filter(k -> marines.get(k).getId().equals(id))
                 .findAny();
         if (mbKey.isPresent()) {
             Long key = mbKey.get();
             SpaceMarine old = marines.get(key);
+            if (!isCurrentUsers(old)) {
+                return ManagerAnswer.BAD_OWNER;
+            }
             marine.setId(id);
             marine.setCreationDate(old.getCreationDate());
             marines.put(key, marine);
-            return true;
+            return ManagerAnswer.OK;
         }
-        return false;
+        return ManagerAnswer.BAD_OP;
     }
 
-    public boolean removeKey(Long key) {
+    public ManagerAnswer removeKey(Long key) {
         if (marines.containsKey(key)) {
+            if (!isCurrentUsers(marines.get(key))) {
+                return ManagerAnswer.BAD_OWNER;
+            }
             marines.remove(key);
-            return true;
+            return ManagerAnswer.OK;
         }
-        return false;
+        return ManagerAnswer.BAD_OP;
     }
 
     public void clear() {
-        marines.clear();
+        marines.keySet()
+                .stream().filter(k -> isCurrentUsers(marines.get(k)))
+                .forEach(marines::remove);
     }
 
     public void removeLower(SpaceMarine marine) {
         marines.keySet()
                 .stream().filter(k -> marines.get(k).compareTo(marine) < 0)
+                .filter(k -> isCurrentUsers(marines.get(k)))
                 .forEach(marines::remove);
     }
 
-    public boolean replaceIfLower(Long key, SpaceMarine marine) {
+    public ManagerAnswer replaceIfLower(Long key, SpaceMarine marine) {
         if (marines.containsKey(key)) {
             SpaceMarine old = marines.get(key);
+            if (!isCurrentUsers(old)) {
+                return ManagerAnswer.BAD_OWNER;
+            }
             if (old.compareTo(marine) < 0) {
                 marine.setId(old.getId());
                 marine.setCreationDate(old.getCreationDate());
                 marines.put(key, marine);
             }
-            return true;
+            return ManagerAnswer.OK;
         }
-        return false;
+        return ManagerAnswer.BAD_OP;
     }
 
     public void removeLowerKey(Long key) {
         marines.keySet()
                 .stream().filter(k -> k < key)
+                .filter(k -> isCurrentUsers(marines.get(k)))
                 .forEach(marines::remove);
     }
 

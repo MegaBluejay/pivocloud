@@ -28,6 +28,7 @@ public class Client {
     Socket socket;
     DataInputStream dis;
     OutputStream os;
+    String user;
     RequestFactory requestFactory = null;
 
     private static String md2(String password) {
@@ -94,6 +95,7 @@ public class Client {
             }
             printResonse(response);
             if (response.success) {
+                this.user = user;
                 requestFactory = new RequestFactory(user, passHash);
                 return;
             }
@@ -274,7 +276,7 @@ public class Client {
             );
             chapter = new Chapter(chapterName, world);
         }
-        return new SpaceMarine(id, name, coordinates, date, health, category, weapon, meleeWeapon, chapter);
+        return new SpaceMarine(id, name, coordinates, date, health, category, weapon, meleeWeapon, chapter, user);
     }
 
     private Optional<Command> readCommand(Scanner scanner, boolean quiet) {

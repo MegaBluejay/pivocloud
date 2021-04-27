@@ -95,7 +95,7 @@ public class Server {
                 return s.replaceAll("^\"|\"$", "");
             }).toArray(String[]::new);
 
-            if (fields.length != 12) {
+            if (fields.length != 13) {
                 errors.put(i++, "only " + fields.length + " fields");
                 continue;
             }
@@ -194,7 +194,9 @@ public class Server {
                 chapter = new Chapter(chapterName, world);
             }
 
-            marines.put(key, new SpaceMarine(id, name, coordinates, creationDate, health, category, weapon, meleeWeapon, chapter));
+            String owner = fields[12];
+
+            marines.put(key, new SpaceMarine(id, name, coordinates, creationDate, health, category, weapon, meleeWeapon, chapter, owner));
             i++;
         }
         return errors;
@@ -259,7 +261,8 @@ public class Server {
                             m.getCoordinates().getY(), dateFormat.format(m.getCreationDate()),
                             m.getHealth(), m.getCategory(), m.getWeaponType(), m.getMeleeWeapon(),
                             Optional.ofNullable(m.getChapter()).map(Chapter::getName).orElse(null),
-                            Optional.ofNullable(m.getChapter()).map(Chapter::getWorld).orElse(null))
+                            Optional.ofNullable(m.getChapter()).map(Chapter::getWorld).orElse(null),
+                            m.getOwner())
                             .map(Server::quotedToString).collect(Collectors.joining(", "));
                     writer.println(line);
                 });
@@ -419,6 +422,7 @@ public class Server {
     private void printMarine(Map.Entry<Long, SpaceMarine> entry) {
         Long key = entry.getKey();
         SpaceMarine marine = entry.getValue();
+        state.out.println("Owner: " + marine.getOwner());
         state.out.println("Key: " + key);
         state.out.println("ID: " + marine.getId());
         state.out.println("Name: " + marine.getName());
@@ -457,6 +461,7 @@ public class Server {
 
     public void handleNormalRequest(NormalRequest request) {
         if (users.containsKey(request.user) && users.get(request.user).equals(request.passHash)) {
+            manager.setCurrentUser(request.user);
             request.command.execute(this);
         } else {
             state.success = false;
@@ -502,10 +507,16 @@ public class Server {
         }
     }
 
-    public void executeInsert(InsertCommand command) {
-        if (!manager.insert(command.key, command.marine)) {
-            state.out.println("key already present");
+    private void handleManagerAnswer(ManagerAnswer answer, String errorMessage) {
+        if (answer == ManagerAnswer.BAD_OP) {
+            state.out.println(errorMessage);
+        } else if (answer == ManagerAnswer.BAD_OWNER) {
+            state.out.println("can't modify someone else's marine");
         }
+    }
+
+    public void executeInsert(InsertCommand command) {
+        handleManagerAnswer(manager.insert(command.key, command.marine), "key already present");
     }
 
     public void executePrintAscending(PrintAscendingCommand command) {
@@ -513,9 +524,7 @@ public class Server {
     }
 
     public void executeRemoveKey(RemoveKeyCommand command) {
-        if (!manager.removeKey(command.key)) {
-            state.out.println("key not found");
-        }
+        handleManagerAnswer(manager.removeKey(command.key), "key not found");
     }
 
     public void executeRemoveLower(RemoveLowerCommand command) {
@@ -527,9 +536,7 @@ public class Server {
     }
 
     public void executeReplaceIfLower(ReplaceIfLowerCommand command) {
-        if (!manager.replaceIfLower(command.key, command.marine)) {
-            state.out.println("key not found");
-        }
+        handleManagerAnswer(manager.replaceIfLower(command.key, command.marine), "key not found");
     }
 
     public void executeShow(ShowCommand command) {
@@ -537,8 +544,6 @@ public class Server {
     }
 
     public void executeUpdate(UpdateCommand command) {
-        if (!manager.update(command.id, command.marine)) {
-            state.out.println("id not found");
-        }
+        handleManagerAnswer(manager.update(command.id, command.marine), "id not found");
     }
 }
