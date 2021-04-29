@@ -1,4 +1,4 @@
-drop table if exists users, marines;
+drop table if exists marines, users;
 drop type if exists cat, weapon, melee, chapter;
 
 create table users (
@@ -30,7 +30,8 @@ create type chapter as (
 );
 
 create table marines (
-    id serial primary key,
+    k bigint primary key,
+    id bigserial,
     owner text references users(name),
     name text not null,
     coords point not null,
@@ -39,5 +40,5 @@ create table marines (
     category cat,
     weapon weapon not null,
     melee melee not null,
-    chapter chapter check ( name(chapter) is not null )
+    chapter chapter check ( chapter is null or name(chapter) is not null )
 );

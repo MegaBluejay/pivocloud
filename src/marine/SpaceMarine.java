@@ -1,14 +1,14 @@
 package marine;
 
 import java.io.Serializable;
-import java.util.Date;
+import java.time.LocalDate;
 
 public class SpaceMarine implements Comparable<SpaceMarine>, Serializable {
     private String owner;
     private Long id; //Поле не может быть null, Значение поля должно быть больше 0, Значение этого поля должно быть уникальным, Значение этого поля должно генерироваться автоматически
     private String name; //Поле не может быть null, Строка не может быть пустой
     private Coordinates coordinates; //Поле не может быть null
-    private java.util.Date creationDate; //Поле не может быть null, Значение этого поля должно генерироваться автоматически
+    private LocalDate creationDate; //Поле не может быть null, Значение этого поля должно генерироваться автоматически
 
     public String getOwner() {
         return owner;
@@ -42,11 +42,11 @@ public class SpaceMarine implements Comparable<SpaceMarine>, Serializable {
         this.coordinates = coordinates;
     }
 
-    public Date getCreationDate() {
+    public LocalDate getCreationDate() {
         return creationDate;
     }
 
-    public void setCreationDate(Date creationDate) {
+    public void setCreationDate(LocalDate creationDate) {
         this.creationDate = creationDate;
     }
 
@@ -96,7 +96,7 @@ public class SpaceMarine implements Comparable<SpaceMarine>, Serializable {
     private MeleeWeapon meleeWeapon; //Поле не может быть null
     private Chapter chapter; //Поле может быть null
 
-    public SpaceMarine(Long id, String name, Coordinates coordinates, Date creationDate, Float health, AstartesCategory category, Weapon weaponType, MeleeWeapon meleeWeapon, Chapter chapter, String owner) {
+    public SpaceMarine(Long id, String name, Coordinates coordinates, LocalDate creationDate, Float health, AstartesCategory category, Weapon weaponType, MeleeWeapon meleeWeapon, Chapter chapter, String owner) {
         this.id = id;
         this.name = name;
         this.coordinates = coordinates;

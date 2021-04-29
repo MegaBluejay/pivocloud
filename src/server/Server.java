@@ -12,8 +12,10 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.sql.SQLException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -21,195 +23,22 @@ import java.util.stream.Stream;
 
 import static client.Client.readObject;
 
-class ClientState {
-    int toRead = -1;
-    boolean messageReady = false;
-    boolean success = true;
-    ByteBuffer inBuffer;
-    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    PrintStream out = new PrintStream(baos);
-}
-
 public class Server {
 
     private final Selector selector;
     private ClientState state;
-    private final MarineManager manager;
+    private final DatabaseManager manager;
 
-    private String saveFilePath = System.getenv("FILE");
     private final Scanner localScanner;
 
-    SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yy");
+    DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_DATE;
 
-    public static void main(String[] args) throws IOException, ClassNotFoundException {
+    public static void main(String[] args) throws IOException, ClassNotFoundException, SQLException {
         Server server = new Server(3345);
         server.work();
     }
 
-    private static String readLine(InputStreamReader reader) throws IOException {
-        StringBuilder builder = new StringBuilder();
-        int ci;
-        while ((ci = reader.read()) != -1) {
-            char c = (char) ci;
-            if (c == '\n') {
-                break;
-            }
-            builder.append(c);
-        }
-        return builder.toString();
-    }
-
-    private Map<Integer, String> readFile(Map<Long, SpaceMarine> marines) throws CustomFileException {
-        if (saveFilePath == null) {
-            throw CustomFileException.envVarNotSet();
-        }
-        InputStream stream;
-        try {
-            stream = new FileInputStream(saveFilePath);
-        } catch (FileNotFoundException e) {
-            throw CustomFileException.notFound();
-        }
-
-        InputStreamReader reader = new InputStreamReader(stream);
-        String line;
-        int i = 1;
-        Map<Integer, String> errors = new HashMap<>();
-
-        while (true) {
-            try {
-                if ((line = readLine(reader)).isEmpty()) break;
-            } catch (IOException e) {
-                throw CustomFileException.readProblem();
-            }
-
-            String[] ogFields = line.split(" *, *");
-            if (Arrays.stream(ogFields).anyMatch(s -> !(s.startsWith("\"") == s.endsWith("\"")))) {
-                errors.put(i++, "bad quoting");
-                continue;
-            }
-
-            String[] fields = Arrays.stream(ogFields).map(s -> {
-                if (s.equals("null")) {
-                    return null;
-                }
-                return s.replaceAll("^\"|\"$", "");
-            }).toArray(String[]::new);
-
-            if (fields.length != 13) {
-                errors.put(i++, "only " + fields.length + " fields");
-                continue;
-            }
-
-            long key;
-            try {
-                key = Long.parseLong(fields[0]);
-            } catch (NumberFormatException e) {
-                errors.put(i++, "invalid key");
-                continue;
-            }
-
-            long id;
-            try {
-                id = Long.parseLong(fields[1]);
-            } catch (NumberFormatException e) {
-                errors.put(i++, "invalid id");
-                continue;
-            }
-
-            String name = fields[2];
-            if (name.isEmpty()) {
-                errors.put(i++, "invalid name");
-                continue;
-            }
-
-            double x;
-            double y;
-            try {
-                x = Double.parseDouble(fields[3]);
-            } catch (NumberFormatException e) {
-                errors.put(i++, "invalid x coordinate");
-                continue;
-            }
-            try {
-                y = Double.parseDouble(fields[4]);
-            } catch (NumberFormatException e) {
-                errors.put(i++, "invalid y coordinate");
-                continue;
-            }
-            Coordinates coordinates = new Coordinates(x, y);
-
-            Date creationDate;
-            try {
-                creationDate = dateFormat.parse(fields[5]);
-            } catch (ParseException e) {
-                errors.put(i++, "invalid date");
-                continue;
-            }
-
-            float health;
-            try {
-                health = Float.parseFloat(fields[6]);
-                if (health <= 0) {
-                    throw new NumberFormatException();
-                }
-            } catch (NumberFormatException e) {
-                errors.put(i++, "invalid health");
-                continue;
-            }
-
-            AstartesCategory category;
-            if (fields[7] == null) {
-                category = null;
-            } else {
-                try {
-                    category = AstartesCategory.valueOf(fields[7]);
-                } catch (IllegalArgumentException e) {
-                    errors.put(i++, "invalid category");
-                    continue;
-                }
-            }
-
-            Weapon weapon;
-            try {
-                weapon = Weapon.valueOf(fields[8]);
-            } catch (IllegalArgumentException e) {
-                errors.put(i++, "invalid weapon type");
-                continue;
-            }
-
-            MeleeWeapon meleeWeapon;
-            try {
-                meleeWeapon = MeleeWeapon.valueOf(fields[9]);
-            } catch (IllegalArgumentException e) {
-                errors.put(i++, "invalid melee weapon type");
-                continue;
-            }
-
-            Chapter chapter;
-            if (fields[10] == null) {
-                chapter = null;
-            } else {
-                String chapterName = fields[10];
-                String world = fields[11];
-                chapter = new Chapter(chapterName, world);
-            }
-
-            String owner = fields[12];
-
-            marines.put(key, new SpaceMarine(id, name, coordinates, creationDate, health, category, weapon, meleeWeapon, chapter, owner));
-            i++;
-        }
-        return errors;
-    }
-
-    private static String quotedToString(Object o) {
-        if (o == null) {
-            return "null";
-        }
-        return "\"" + o + "\"";
-    }
-
-    private Server(int port) throws IOException {
+    private Server(int port) throws IOException, SQLException {
         selector = Selector.open();
         ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
         serverSocketChannel.configureBlocking(false);
@@ -218,109 +47,17 @@ public class Server {
 
         localScanner = new Scanner(System.in);
 
-        Map<Long, SpaceMarine> marines = new HashMap<>();
+        // todo get this elsewhere
+        String url = "jdbc:postgresql://localhost:5432/pivo";
+        String user = "archer";
+        String password = "mmm";
 
-        try {
-            Map<Integer, String> errors = readFile(marines);
-            if (!errors.isEmpty()) {
-                System.out.println("Errors in file: ");
-                errors.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(e ->
-                        System.out.println("line " + e.getKey() + ": " + e.getValue()));
-            }
-        } catch (CustomFileException e) {
-            System.out.println("Couldn't read file: " + e.getMessage());
-        }
-
-        manager = new MarineManager(marines);
+        manager = new DatabaseManager(url, user, password);
     }
 
     private void send() {
         state.out.flush();
         state.messageReady = true;
-    }
-
-    private void save() {
-        File file = new File(saveFilePath);
-        if (!file.exists()) {
-            try {
-                file.createNewFile();
-            } catch (IOException e) {
-                System.out.println("can't create file");
-                newPath();
-                return;
-            }
-        }
-        if (file.canWrite()) {
-            try {
-                PrintWriter writer = new PrintWriter(saveFilePath);
-                List<Map.Entry<Long, SpaceMarine>> entries = manager.list();
-                entries.forEach(e -> {
-                    Long key = e.getKey();
-                    SpaceMarine m = e.getValue();
-                    String line = Stream.of(key, m.getId(), m.getName(), m.getCoordinates().getX(),
-                            m.getCoordinates().getY(), dateFormat.format(m.getCreationDate()),
-                            m.getHealth(), m.getCategory(), m.getWeaponType(), m.getMeleeWeapon(),
-                            Optional.ofNullable(m.getChapter()).map(Chapter::getName).orElse(null),
-                            Optional.ofNullable(m.getChapter()).map(Chapter::getWorld).orElse(null),
-                            m.getOwner())
-                            .map(Server::quotedToString).collect(Collectors.joining(", "));
-                    writer.println(line);
-                });
-                writer.close();
-            } catch (FileNotFoundException e) {
-                System.out.println("impossible error");
-            }
-        } else {
-            System.out.println("bad permissions");
-            newPath();
-        }
-    }
-
-    private void newPath() {
-        Boolean doSave = readObject(
-                localScanner,
-                false,
-                s -> {
-                    if (s.equals("y")) {
-                        return true;
-                    } else if (s.equals("n")) {
-                        return false;
-                    } else {
-                        throw new IllegalArgumentException();
-                    }
-                },
-                ds -> true,
-                "Do you want to set a new save file path (y/n): ",
-                "enter 'y' or 'n'",
-                false
-        );
-
-        if (doSave) {
-            String path = readObject(
-                    localScanner,
-                    false,
-                    s -> {
-                        try {
-                            File file = new File(s);
-                            boolean wasCreated = file.createNewFile();
-                            if (wasCreated || Files.isWritable(file.toPath())) {
-                                return s;
-                            }
-                        } catch (IOException e) {
-                            throw new IllegalArgumentException();
-                        }
-                        throw new IllegalArgumentException();
-                    },
-                    np -> true,
-                    "Provide a new save file location or leave empty to leave as is: ",
-                    "not a valid path",
-                    true
-            );
-
-            if (path != null) {
-                saveFilePath = path;
-            }
-        }
     }
 
     private void work() throws IOException, ClassNotFoundException {
@@ -333,14 +70,11 @@ public class Server {
                 String line = localScanner.nextLine().trim();
                 String[] args = line.split(" +");
                 if (args.length > 0) {
-                    if (args[0].equals("save")) {
-                        save();
-                    } else if (args[0].equals("exit")) {
-                        save();
+                    if (args[0].equals("exit")) {
                         break;
                     } else if (args[0].equals("help")) {
-                        System.out.println("save to save");
-                        System.out.println("exit to save and exit");
+                        System.out.println("exit to exit");
+                        System.out.println("help for this message");
                     } else {
                         System.out.println("unknown command");
                     }
@@ -388,6 +122,7 @@ public class Server {
                             ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(state.inBuffer.array()));
                             Request request = (Request) ois.readObject();
                             state.toRead = -1;
+                            manager.setCurrentUser(request.user);
                             request.handle(this);
                             send();
                         }
@@ -427,7 +162,7 @@ public class Server {
         state.out.println("ID: " + marine.getId());
         state.out.println("Name: " + marine.getName());
         state.out.println("Coordinates: " + marine.getCoordinates());
-        state.out.println("Creation date: " + dateFormat.format(marine.getCreationDate()));
+        state.out.println("Creation date: " + marine.getCreationDate().format(dateFormatter));
         state.out.println("Health: " + marine.getHealth());
         if (marine.getCategory() != null) {
             state.out.println("Category: " + marine.getCategory());
@@ -456,12 +191,11 @@ public class Server {
     }
 
     private void printMarines(List<Map.Entry<Long, SpaceMarine>> entries) {
-        interDo(entries, this::printMarine, System.out::println);
+        interDo(entries, this::printMarine, state.out::println);
     }
 
     public void handleNormalRequest(NormalRequest request) {
-        if (users.containsKey(request.user) && users.get(request.user).equals(request.passHash)) {
-            manager.setCurrentUser(request.user);
+        if (manager.validCreds(request.passHash)) {
             request.command.execute(this);
         } else {
             state.success = false;
@@ -469,24 +203,17 @@ public class Server {
     }
 
     public void handleTestRequest(TestRequest request) {
-        if (!(users.containsKey(request.user) && users.get(request.user).equals(request.passHash))) {
+        if (!manager.validCreds(request.passHash)) {
             state.success = false;
         }
     }
 
-    Map<String, String> users = new HashMap<>();
     public void handleRegisterRequest(RegisterRequest request) {
-        if (users.containsKey(request.user)) {
-            state.out.println("username already taken");
-            state.success = false;
-        } else {
-            users.put(request.user, request.passHash);
-            state.out.println("registered");
-        }
+        handleManagerAnswer(manager.addUser(request.passHash), "username taken");
     }
 
     public void executeClear(ClearCommand command) {
-        manager.clear();
+        handleManagerAnswer(manager.clear());
     }
     
     public void executeFilterGreaterThanCategory(FilterGreaterThanCategoryCommand command) {
@@ -495,7 +222,7 @@ public class Server {
 
     public void executeGroupCountingByCreationDate(GroupCountingByCreationDateCommand command) {
         manager.groupCountingByCreationDate().forEach(
-                (date, number) -> state.out.println(dateFormat.format(date) + ": " + number));
+                (date, number) -> state.out.println(date.format(dateFormatter) + ": " + number));
     }
 
     public void executeInfo(InfoCommand command) {
@@ -503,7 +230,7 @@ public class Server {
         state.out.println("type: " + info.type);
         state.out.println("number of elements: " + info.n);
         if (info.lastCreatedDate != null) {
-            state.out.println("newest marine created on " + dateFormat.format(info.lastCreatedDate));
+            state.out.println("newest marine created on " + info.lastCreatedDate.format(dateFormatter));
         }
     }
 
@@ -512,6 +239,16 @@ public class Server {
             state.out.println(errorMessage);
         } else if (answer == ManagerAnswer.BAD_OWNER) {
             state.out.println("can't modify someone else's marine");
+        } else if (answer == ManagerAnswer.DB_ERROR) {
+            state.out.println("database error");
+        }
+    }
+
+    private void handleManagerAnswer(ManagerAnswer answer) {
+        if (answer == ManagerAnswer.BAD_OP) {
+            state.out.println("impossible error");
+        } else {
+            handleManagerAnswer(answer, "");
         }
     }
 

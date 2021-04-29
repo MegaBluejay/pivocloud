@@ -10,8 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
 import java.util.Arrays;
-import java.util.Date;
 import java.util.Optional;
 import java.util.Scanner;
 import java.util.function.Function;
@@ -187,7 +187,7 @@ public class Client {
 
         Coordinates coordinates = new Coordinates(x,y);
 
-        Date date = null;
+        LocalDate date = null;
 
         Float health = readObject(
                 scanner,
