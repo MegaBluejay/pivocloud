@@ -3,10 +3,10 @@ package message;
 import marine.SpaceMarine;
 import server.Server;
 
-public class UpdateCommand implements Command {
+public class UpdateCommand extends Command {
     @Override
-    public void execute(Server server) {
-        server.executeUpdate(this);
+    public void execute(Server server, String currentUser) {
+        server.executeUpdate(currentUser, this);
     }
 
     public long id;

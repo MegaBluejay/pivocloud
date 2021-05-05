@@ -1,9 +1,11 @@
 package message;
 
+import server.ClientState;
 import server.Server;
 
 import java.io.Serializable;
 
-public interface Command extends Serializable {
-    void execute(Server server);
+public abstract class Command implements Serializable {
+    public ClientState state;
+    public abstract void execute(Server server, String currentUser);
 }

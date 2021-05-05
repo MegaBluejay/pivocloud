@@ -1,7 +1,7 @@
 package server;
 
+import marine.SpaceMarine;
 import message.*;
-import marine.*;
 
 import java.io.*;
 import java.net.InetSocketAddress;
@@ -11,29 +11,93 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.sql.SQLException;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.RecursiveAction;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static client.Client.readObject;
 
 public class Server {
 
+    class InputAction extends RecursiveAction {
+
+        private final List<SelectionKey> keys;
+        private static final int threshold = 2;
+
+        InputAction(List<SelectionKey> keys) {
+            this.keys = keys;
+        }
+
+        private List<InputAction> subtasks() {
+            List<InputAction> divided = new ArrayList<>();
+            divided.add(new InputAction(keys.subList(0, keys.size()/2)));
+            divided.add(new InputAction(keys.subList(keys.size()/2, keys.size())));
+            return divided;
+        }
+
+        private void process() {
+            ByteBuffer intBuffer = ByteBuffer.allocate(4);
+            keys.forEach(key -> {
+                try {
+                    SocketChannel client = (SocketChannel) key.channel();
+                    ClientState state = (ClientState) key.attachment();
+
+                    synchronized (state) {
+                        if (state.toRead == -1) {
+                            int r = client.read(intBuffer);
+                            if (r == -1) {
+                                client.close();
+                                return;
+                            }
+                            intBuffer.flip();
+                            state.toRead = intBuffer.getInt();
+                            intBuffer.clear();
+                            state.inBuffer = ByteBuffer.allocate(state.toRead);
+                        } else {
+                            client.read(state.inBuffer);
+                            if (state.inBuffer.position() == state.toRead) {
+                                state.inBuffer.flip();
+                                ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(state.inBuffer.array()));
+                                state.toRead = -1;
+                                Request request = (Request) ois.readObject();
+                                request.state = state;
+                                Thread thread = new Thread(() -> {
+                                    request.handle(Server.this);
+                                    state.out.flush();
+                                    state.messageReady = true;
+                                });
+                                thread.start();
+                            }
+                        }
+                    }
+                } catch (IOException | ClassNotFoundException e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+
+        @Override
+        protected void compute() {
+            if (keys.size() > threshold) {
+                ForkJoinTask.invokeAll(subtasks());
+            } else {
+                process();
+            }
+        }
+    }
+
     private final Selector selector;
-    private ClientState state;
     private final DatabaseManager manager;
 
     private final Scanner localScanner;
 
     DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_DATE;
 
-    public static void main(String[] args) throws IOException, ClassNotFoundException, SQLException {
+    private final ForkJoinPool inPool = ForkJoinPool.commonPool();
+
+    public static void main(String[] args) throws IOException, SQLException {
         Server server = new Server(3345);
         server.work();
     }
@@ -55,14 +119,8 @@ public class Server {
         manager = new DatabaseManager(url, user, password);
     }
 
-    private void send() {
-        state.out.flush();
-        state.messageReady = true;
-    }
-
-    private void work() throws IOException, ClassNotFoundException {
+    private void work() throws IOException {
         ByteBuffer shortBuffer = ByteBuffer.allocate(2);
-        ByteBuffer intBuffer = ByteBuffer.allocate(4);
         ByteBuffer boolBuffer = ByteBuffer.allocate(1);
 
         while (true) {
@@ -87,6 +145,8 @@ public class Server {
                 continue;
             }
 
+            List<SelectionKey> readable = new ArrayList<>();
+
             Set<SelectionKey> keys = selector.selectedKeys();
             Iterator<SelectionKey> it = keys.iterator();
             while (it.hasNext()) {
@@ -102,35 +162,11 @@ public class Server {
                 }
 
                 if (key.isReadable()) {
-                    SocketChannel client = (SocketChannel) key.channel();
-                    state = (ClientState) key.attachment();
-
-                    if (state.toRead == -1) {
-                        int r = client.read(intBuffer);
-                        if (r == -1) {
-                            client.close();
-                            continue;
-                        }
-                        intBuffer.flip();
-                        state.toRead = intBuffer.getInt();
-                        intBuffer.clear();
-                        state.inBuffer = ByteBuffer.allocate(state.toRead);
-                    } else {
-                        client.read(state.inBuffer);
-                        if (state.inBuffer.position() == state.toRead) {
-                            state.inBuffer.flip();
-                            ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(state.inBuffer.array()));
-                            Request request = (Request) ois.readObject();
-                            state.toRead = -1;
-                            manager.setCurrentUser(request.user);
-                            request.handle(this);
-                            send();
-                        }
-                    }
+                    readable.add(key);
                 }
 
                 if (key.isWritable()) {
-                    state = (ClientState) key.attachment();
+                    ClientState state = (ClientState) key.attachment();
                     if (state.messageReady) {
                         SocketChannel client = (SocketChannel) key.channel();
                         boolBuffer.put((byte) (state.success ? 1 : 0));
@@ -151,10 +187,13 @@ public class Server {
                     }
                 }
             }
+            if (!readable.isEmpty()) {
+                inPool.execute(new InputAction(readable));
+            }
         }
     }
     
-    private void printMarine(Map.Entry<Long, SpaceMarine> entry) {
+    private void printMarine(ClientState state, Map.Entry<Long, SpaceMarine> entry) {
         Long key = entry.getKey();
         SpaceMarine marine = entry.getValue();
         state.out.println("Owner: " + marine.getOwner());
@@ -190,42 +229,43 @@ public class Server {
         }
     }
 
-    private void printMarines(List<Map.Entry<Long, SpaceMarine>> entries) {
-        interDo(entries, this::printMarine, state.out::println);
+    private void printMarines(ClientState state, List<Map.Entry<Long, SpaceMarine>> entries) {
+        interDo(entries, m -> printMarine(state, m), state.out::println);
     }
 
     public void handleNormalRequest(NormalRequest request) {
-        if (manager.validCreds(request.passHash)) {
-            request.command.execute(this);
+        if (manager.validCreds(request.user, request.passHash)) {
+            request.command.state = request.state;
+            request.command.execute(this, request.user);
         } else {
-            state.success = false;
+            request.state.success = false;
         }
     }
 
     public void handleTestRequest(TestRequest request) {
-        if (!manager.validCreds(request.passHash)) {
-            state.success = false;
+        if (!manager.validCreds(request.user, request.passHash)) {
+            request.state.success = false;
         }
     }
 
     public void handleRegisterRequest(RegisterRequest request) {
-        handleManagerAnswer(manager.addUser(request.passHash), "username taken");
+        handleManagerAnswer(request.state, manager.addUser(request.user, request.passHash), "username taken");
     }
 
-    public void executeClear(ClearCommand command) {
-        handleManagerAnswer(manager.clear());
+    public void executeClear(ClientState state, String currentUser) {
+        handleManagerAnswer(state, manager.clear(currentUser));
     }
     
     public void executeFilterGreaterThanCategory(FilterGreaterThanCategoryCommand command) {
-        printMarines(manager.filterGreaterThanCategory(command.category));
+        printMarines(command.state, manager.filterGreaterThanCategory(command.category));
     }
 
-    public void executeGroupCountingByCreationDate(GroupCountingByCreationDateCommand command) {
+    public void executeGroupCountingByCreationDate(ClientState state) {
         manager.groupCountingByCreationDate().forEach(
                 (date, number) -> state.out.println(date.format(dateFormatter) + ": " + number));
     }
 
-    public void executeInfo(InfoCommand command) {
+    public void executeInfo(ClientState state) {
         MarineInfo info = manager.info();
         state.out.println("type: " + info.type);
         state.out.println("number of elements: " + info.n);
@@ -234,7 +274,7 @@ public class Server {
         }
     }
 
-    private void handleManagerAnswer(ManagerAnswer answer, String errorMessage) {
+    private void handleManagerAnswer(ClientState state, ManagerAnswer answer, String errorMessage) {
         if (answer == ManagerAnswer.BAD_OP) {
             state.out.println(errorMessage);
         } else if (answer == ManagerAnswer.BAD_OWNER) {
@@ -244,43 +284,43 @@ public class Server {
         }
     }
 
-    private void handleManagerAnswer(ManagerAnswer answer) {
+    private void handleManagerAnswer(ClientState state, ManagerAnswer answer) {
         if (answer == ManagerAnswer.BAD_OP) {
             state.out.println("impossible error");
         } else {
-            handleManagerAnswer(answer, "");
+            handleManagerAnswer(state, answer, "");
         }
     }
 
-    public void executeInsert(InsertCommand command) {
-        handleManagerAnswer(manager.insert(command.key, command.marine), "key already present");
+    public void executeInsert(String currentUser, InsertCommand command) {
+        handleManagerAnswer(command.state, manager.insert(currentUser, command.key, command.marine), "key already present");
     }
 
-    public void executePrintAscending(PrintAscendingCommand command) {
-        printMarines(manager.ascending());
+    public void executePrintAscending(ClientState state) {
+        printMarines(state, manager.ascending());
     }
 
-    public void executeRemoveKey(RemoveKeyCommand command) {
-        handleManagerAnswer(manager.removeKey(command.key), "key not found");
+    public void executeRemoveKey(String currentUser, RemoveKeyCommand command) {
+        handleManagerAnswer(command.state, manager.removeKey(currentUser, command.key), "key not found");
     }
 
-    public void executeRemoveLower(RemoveLowerCommand command) {
-        manager.removeLower(command.marine);
+    public void executeRemoveLower(String currentUser, RemoveLowerCommand command) {
+        handleManagerAnswer(command.state, manager.removeLower(currentUser, command.marine));
     }
 
-    public void executeRemoveLowerKey(RemoveLowerKeyCommand command) {
-        manager.removeLowerKey(command.key);
+    public void executeRemoveLowerKey(String currentUser, RemoveLowerKeyCommand command) {
+        handleManagerAnswer(command.state, manager.removeLowerKey(currentUser, command.key));
     }
 
-    public void executeReplaceIfLower(ReplaceIfLowerCommand command) {
-        handleManagerAnswer(manager.replaceIfLower(command.key, command.marine), "key not found");
+    public void executeReplaceIfLower(String currentUser, ReplaceIfLowerCommand command) {
+        handleManagerAnswer(command.state, manager.replaceIfLower(currentUser, command.key, command.marine), "key not found");
     }
 
-    public void executeShow(ShowCommand command) {
-        printMarines(manager.list());
+    public void executeShow(ClientState state) {
+        printMarines(state, manager.list());
     }
 
-    public void executeUpdate(UpdateCommand command) {
-        handleManagerAnswer(manager.update(command.id, command.marine), "id not found");
+    public void executeUpdate(String currentUser, UpdateCommand command) {
+        handleManagerAnswer(command.state, manager.update(currentUser, command.id, command.marine), "id not found");
     }
 }

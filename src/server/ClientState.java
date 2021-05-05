@@ -4,7 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 
-class ClientState {
+public class ClientState {
     int toRead = -1;
     boolean messageReady = false;
     boolean success = true;

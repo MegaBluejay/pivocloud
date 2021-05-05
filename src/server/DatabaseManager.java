@@ -8,6 +8,7 @@ import java.sql.Date;
 import java.sql.*;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 public class DatabaseManager {
@@ -16,7 +17,6 @@ public class DatabaseManager {
     private Map<Long, SpaceMarine> marines;
     Connection con;
 
-    private String currentUser;
 
     private final PreparedStatement insertStatement;
     private final PreparedStatement updateStatement;
@@ -28,23 +28,23 @@ public class DatabaseManager {
     private final PreparedStatement syncMarinesStatement;
     private final PreparedStatement syncUsersStatement;
 
-    private boolean isCurrentUsers(SpaceMarine marine) {
+    private final ReentrantLock lock;
+
+    private boolean isCurrentUsers(String currentUser, SpaceMarine marine) {
         return marine.getOwner().equals(currentUser);
     }
 
-    public void setCurrentUser(String user) {
-        currentUser = user;
-    }
 
-    public boolean haveUser() {
+    public boolean haveUser(String currentUser) {
         return users.containsKey(currentUser);
     }
 
-    public boolean validCreds (String passHash) {
-        return haveUser() && users.get(currentUser).equals(passHash);
+    public boolean validCreds (String currentUser, String passHash) {
+        return haveUser(currentUser) && users.get(currentUser).equals(passHash);
     }
 
     public DatabaseManager(String url, String user, String password) throws SQLException {
+        lock = new ReentrantLock();
         con = DriverManager.getConnection(url, user, password);
         ((PGConnection) con).addDataType("chapter", Chapter.class);
 
@@ -107,10 +107,11 @@ public class DatabaseManager {
         }
     }
 
-    public ManagerAnswer addUser(String passHash) {
+    public ManagerAnswer addUser(String currentUser, String passHash) {
         if (users.containsKey(currentUser)) {
             return ManagerAnswer.BAD_OP;
         }
+        lock.lock();
         try {
             adduserStatement.setString(1, currentUser);
             adduserStatement.setString(2, passHash);
@@ -121,6 +122,8 @@ public class DatabaseManager {
             return ManagerAnswer.OK;
         } catch (SQLException throwables) {
             return ManagerAnswer.DB_ERROR;
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -132,10 +135,11 @@ public class DatabaseManager {
         return new MarineInfo(type, n, date);
     }
 
-    public ManagerAnswer insert(Long key, SpaceMarine marine) {
+    public ManagerAnswer insert(String currentUser, Long key, SpaceMarine marine) {
         if (marines.containsKey(key)) {
             return ManagerAnswer.BAD_OP;
         }
+        lock.lock();
         try {
             insertStatement.setLong(1, key);
             insertStatement.setString(2, currentUser);
@@ -162,6 +166,8 @@ public class DatabaseManager {
             return ManagerAnswer.OK;
         } catch (SQLException throwables) {
             return ManagerAnswer.DB_ERROR;
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -169,7 +175,7 @@ public class DatabaseManager {
         return new ArrayList<>(marines.entrySet());
     }
 
-    public ManagerAnswer update(Long id, SpaceMarine marine) {
+    public ManagerAnswer update(String currentUser, Long id, SpaceMarine marine) {
         Optional<Long> mbKey = marines.keySet()
                 .stream().filter(k -> marines.get(k).getId().equals(id))
                 .findAny();
@@ -178,11 +184,12 @@ public class DatabaseManager {
         }
         Long key = mbKey.get();
         SpaceMarine old = marines.get(key);
-        if (!isCurrentUsers(old)) {
+        if (!isCurrentUsers(currentUser, old)) {
             return ManagerAnswer.BAD_OWNER;
         }
         marine.setId(id);
         marine.setCreationDate(old.getCreationDate());
+        lock.lock();
         try {
             updateStatement.setString(1, marine.getName());
             PGpoint sqlPoint = new PGpoint(marine.getCoordinates().getX(), marine.getCoordinates().getY());
@@ -200,16 +207,19 @@ public class DatabaseManager {
             return ManagerAnswer.OK;
         } catch (SQLException throwables) {
             return ManagerAnswer.DB_ERROR;
+        } finally {
+            lock.unlock();
         }
     }
 
-    public ManagerAnswer removeKey(Long key) {
+    public ManagerAnswer removeKey(String currentUser, Long key) {
         if (!marines.containsKey(key)) {
             return ManagerAnswer.BAD_OP;
         }
-        if (!isCurrentUsers(marines.get(key))) {
+        if (!isCurrentUsers(currentUser, marines.get(key))) {
             return ManagerAnswer.BAD_OWNER;
         }
+        lock.lock();
         try {
             removeKeyStatement.setLong(1, key);
 
@@ -219,25 +229,31 @@ public class DatabaseManager {
             return ManagerAnswer.OK;
         } catch (SQLException throwables) {
             return ManagerAnswer.DB_ERROR;
+        } finally {
+            lock.unlock();
         }
     }
 
-    public ManagerAnswer clear() {
+    public ManagerAnswer clear(String currentUser) {
+        lock.lock();
         try {
             clearStatement.setString(1, currentUser);
 
             clearStatement.execute();
 
             marines.keySet()
-                    .stream().filter(k -> isCurrentUsers(marines.get(k)))
+                    .stream().filter(k -> isCurrentUsers(currentUser, marines.get(k)))
                     .forEach(marines::remove);
             return ManagerAnswer.OK;
         } catch (SQLException throwables) {
             return ManagerAnswer.DB_ERROR;
+        } finally {
+            lock.unlock();
         }
     }
 
-    public ManagerAnswer removeLower(SpaceMarine marine) {
+    public ManagerAnswer removeLower(String currentUser, SpaceMarine marine) {
+        lock.lock();
         try {
             removeLowerStatement.setFloat(1, marine.getHealth());
             removeLowerStatement.setString(2, currentUser);
@@ -246,29 +262,32 @@ public class DatabaseManager {
 
             marines.keySet()
                     .stream().filter(k -> marines.get(k).compareTo(marine) < 0)
-                    .filter(k -> isCurrentUsers(marines.get(k)))
+                    .filter(k -> isCurrentUsers(currentUser, marines.get(k)))
                     .forEach(marines::remove);
             return ManagerAnswer.OK;
         } catch (SQLException throwables) {
             return ManagerAnswer.DB_ERROR;
+        } finally {
+            lock.unlock();
         }
     }
 
-    public ManagerAnswer replaceIfLower(Long key, SpaceMarine marine) {
+    public ManagerAnswer replaceIfLower(String currentUser, Long key, SpaceMarine marine) {
         if (!marines.containsKey(key)) {
             return ManagerAnswer.BAD_OP;
         }
         SpaceMarine old = marines.get(key);
-        if (!isCurrentUsers(old)) {
+        if (!isCurrentUsers(currentUser, old)) {
             return ManagerAnswer.BAD_OWNER;
         }
         if (old.compareTo(marine) < 0) {
-            return update(old.getId(), marine);
+            return update(currentUser, old.getId(), marine);
         }
         return ManagerAnswer.OK;
     }
 
-    public ManagerAnswer removeLowerKey(Long key) {
+    public ManagerAnswer removeLowerKey(String currentUser, Long key) {
+        lock.lock();
         try {
             removeLowerKeyStatement.setLong(1, key);
             removeLowerKeyStatement.setString(2, currentUser);
@@ -277,11 +296,13 @@ public class DatabaseManager {
 
             marines.keySet()
                     .stream().filter(k -> k < key)
-                    .filter(k -> isCurrentUsers(marines.get(k)))
+                    .filter(k -> isCurrentUsers(currentUser, marines.get(k)))
                     .forEach(marines::remove);
             return ManagerAnswer.OK;
         } catch (SQLException throwables) {
             return ManagerAnswer.DB_ERROR;
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -294,7 +315,7 @@ public class DatabaseManager {
     public List<Map.Entry<Long, SpaceMarine>> filterGreaterThanCategory(AstartesCategory category) {
         return marines.entrySet()
                 .stream().filter(e -> {
-                    AstartesCategory cat = e.getValue().getCategory();;
+                    AstartesCategory cat = e.getValue().getCategory();
                     return cat != null && cat.ordinal() > category.ordinal();
                 }).collect(Collectors.toList());
     }

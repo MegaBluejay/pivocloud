@@ -3,10 +3,10 @@ package message;
 import marine.SpaceMarine;
 import server.Server;
 
-public class ReplaceIfLowerCommand implements Command {
+public class ReplaceIfLowerCommand extends Command {
     @Override
-    public void execute(Server server) {
-        server.executeReplaceIfLower(this);
+    public void execute(Server server, String currentUser) {
+        server.executeReplaceIfLower(currentUser, this);
     }
 
     public long key;

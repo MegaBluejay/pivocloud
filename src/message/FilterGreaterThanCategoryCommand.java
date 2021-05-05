@@ -3,9 +3,9 @@ package message;
 import marine.AstartesCategory;
 import server.Server;
 
-public class FilterGreaterThanCategoryCommand implements Command {
+public class FilterGreaterThanCategoryCommand extends Command {
     @Override
-    public void execute(Server server) {
+    public void execute(Server server, String currentUser) {
         server.executeFilterGreaterThanCategory(this);
     }
 

@@ -2,9 +2,9 @@ package message;
 
 import server.Server;
 
-public class InfoCommand implements Command{
+public class InfoCommand extends Command {
     @Override
-    public void execute(Server server) {
-        server.executeInfo(this);
+    public void execute(Server server, String currentUser) {
+        server.executeInfo(state);
     }
 }
