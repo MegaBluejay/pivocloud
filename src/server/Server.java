@@ -14,9 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.ForkJoinTask;
-import java.util.concurrent.RecursiveAction;
+import java.util.concurrent.*;
 import java.util.function.Consumer;
 
 public class Server {
@@ -53,7 +51,6 @@ public class Server {
                             }
                             intBuffer.flip();
                             state.toRead = intBuffer.getInt();
-                            intBuffer.clear();
                             state.inBuffer = ByteBuffer.allocate(state.toRead);
                         } else {
                             client.read(state.inBuffer);
@@ -74,6 +71,8 @@ public class Server {
                     }
                 } catch (IOException | ClassNotFoundException e) {
                     e.printStackTrace();
+                } finally {
+                    intBuffer.clear();
                 }
             });
         }
@@ -93,9 +92,10 @@ public class Server {
 
     private final Scanner localScanner;
 
-    DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_DATE;
+    private static final DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_DATE;
 
     private final ForkJoinPool inPool = ForkJoinPool.commonPool();
+    private final Executor outExecutor = Executors.newFixedThreadPool(5);
 
     public static void main(String[] args) throws IOException, SQLException {
         Server server = new Server(3345);
@@ -120,9 +120,6 @@ public class Server {
     }
 
     private void work() throws IOException {
-        ByteBuffer shortBuffer = ByteBuffer.allocate(2);
-        ByteBuffer boolBuffer = ByteBuffer.allocate(1);
-
         while (true) {
             if (System.in.available() != 0) {
                 String line = localScanner.nextLine().trim();
@@ -166,25 +163,34 @@ public class Server {
                 }
 
                 if (key.isWritable()) {
-                    ClientState state = (ClientState) key.attachment();
-                    if (state.messageReady) {
-                        SocketChannel client = (SocketChannel) key.channel();
-                        boolBuffer.put((byte) (state.success ? 1 : 0));
-                        boolBuffer.flip();
-                        client.write(boolBuffer);
-                        boolBuffer.clear();
-                        String message = state.baos.toString();
-                        ByteBuffer bb = StandardCharsets.UTF_8.encode(message);
-                        shortBuffer.putShort((short) bb.remaining());
-                        shortBuffer.flip();
-                        client.write(shortBuffer);
-                        client.write(bb);
-                        shortBuffer.clear();
-                        state.messageReady = false;
-                        state.baos = new ByteArrayOutputStream();
-                        state.out = new PrintStream(state.baos);
-                        state.success = true;
-                    }
+                    outExecutor.execute(() -> {
+                        ClientState state = (ClientState) key.attachment();
+                        synchronized (state) {
+                            if (state.messageReady) {
+                                ByteBuffer boolBuffer = ByteBuffer.allocate(1);
+                                ByteBuffer shortBuffer = ByteBuffer.allocate(2);
+                                try {
+                                    SocketChannel client = (SocketChannel) key.channel();
+                                    boolBuffer.put((byte) (state.success ? 1 : 0));
+                                    boolBuffer.flip();
+                                    client.write(boolBuffer);
+                                    String message = state.baos.toString();
+                                    ByteBuffer bb = StandardCharsets.UTF_8.encode(message);
+                                    shortBuffer.putShort((short) bb.remaining());
+                                    shortBuffer.flip();
+                                    client.write(shortBuffer);
+                                    client.write(bb);
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                } finally {
+                                    state.baos = new ByteArrayOutputStream();
+                                    state.out = new PrintStream(state.baos);
+                                    state.success = true;
+                                    state.messageReady = false;
+                                }
+                            }
+                        }
+                    });
                 }
             }
             if (!readable.isEmpty()) {
