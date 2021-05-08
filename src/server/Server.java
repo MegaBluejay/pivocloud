@@ -69,8 +69,8 @@ public class Server {
                             }
                         }
                     }
-                } catch (IOException | ClassNotFoundException e) {
-                    e.printStackTrace();
+                } catch (IOException | ClassNotFoundException ignored) {
+
                 } finally {
                     intBuffer.clear();
                 }
@@ -180,8 +180,7 @@ public class Server {
                                     shortBuffer.flip();
                                     client.write(shortBuffer);
                                     client.write(bb);
-                                } catch (IOException e) {
-                                    e.printStackTrace();
+                                } catch (IOException ignored) {
                                 } finally {
                                     state.baos = new ByteArrayOutputStream();
                                     state.out = new PrintStream(state.baos);
