@@ -111,10 +111,9 @@ public class Server {
 
         localScanner = new Scanner(System.in);
 
-        // todo get this elsewhere
-        String url = "jdbc:postgresql://localhost:5432/pivo";
-        String user = "archer";
-        String password = "mmm";
+        String url = "jdbc:postgresql://" + System.getenv("LAB7_DB");
+        String user = System.getenv("LAB7_USER");
+        String password = System.getenv("LAB7_PASSWORD");
 
         manager = new DatabaseManager(url, user, password);
     }
