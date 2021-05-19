@@ -97,9 +97,15 @@ public class Server {
     private final ForkJoinPool inPool = ForkJoinPool.commonPool();
     private final Executor outExecutor = Executors.newFixedThreadPool(5);
 
-    public static void main(String[] args) throws IOException, SQLException {
-        Server server = new Server(3345);
-        server.work();
+    public static void main(String[] args) {
+        try {
+            Server server = new Server(3345);
+            server.work();
+        } catch (SQLException e) {
+            System.out.println("sql error, check config variables");
+        } catch (IOException e) {
+            System.out.println("unknown IO error");
+        }
     }
 
     private Server(int port) throws IOException, SQLException {
@@ -111,7 +117,9 @@ public class Server {
 
         localScanner = new Scanner(System.in);
 
+//        String url = "jdbc:postgresql://localhost:5432/pivo";
         String url = "jdbc:postgresql://" + System.getenv("LAB7_DB");
+        System.out.println(url);
         String user = System.getenv("LAB7_USER");
         String password = System.getenv("LAB7_PASSWORD");
 

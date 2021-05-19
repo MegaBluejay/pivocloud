@@ -2,6 +2,7 @@ package client;
 
 import message.*;
 import marine.*;
+import org.checkerframework.checker.nullness.Opt;
 
 import java.io.*;
 import java.net.Socket;
@@ -14,6 +15,7 @@ import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.Scanner;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -48,56 +50,61 @@ public class Client {
 
     private void login(Scanner scanner, boolean quiet) {
         while (true) {
-            Boolean needRegister = readObject(
-                    scanner,
-                    quiet,
-                    s -> {
-                        s = s.toLowerCase();
-                        if (s.equals("l") || s.isEmpty()) {
-                            return false;
-                        } else if (s.equals("r")) {
-                            return true;
-                        } else {
-                            throw new IllegalArgumentException();
-                        }
-                    },
-                    nr -> true,
-                    "Do you want to login or register? ([L]/r) ",
-                    "enter 'l', 'r', or leave empty for default",
-                    false
-            );
+            try {
+                Boolean needRegister = readObject(
+                        scanner,
+                        quiet,
+                        s -> {
+                            s = s.toLowerCase();
+                            if (s.equals("l") || s.isEmpty()) {
+                                return false;
+                            } else if (s.equals("r")) {
+                                return true;
+                            } else {
+                                throw new IllegalArgumentException();
+                            }
+                        },
+                        nr -> true,
+                        "Do you want to login or register? ([L]/r) ",
+                        "enter 'l', 'r', or leave empty for default",
+                        false
+                );
 
-            String user = readObject(
-                    scanner,
-                    quiet,
-                    s -> s,
-                    u -> true,
-                    "Enter username: ",
-                    "",
-                    false
-            );
-            String password = readObject(
-                    scanner,
-                    quiet,
-                    s -> s,
-                    p -> true,
-                    "Enter password: ",
-                    "",
-                    false
-            );
-            String passHash = md2(password);
+                String user = readObject(
+                        scanner,
+                        quiet,
+                        s -> s,
+                        u -> true,
+                        "Enter username: ",
+                        "",
+                        false
+                );
+                String password = readObject(
+                        scanner,
+                        quiet,
+                        s -> s,
+                        p -> true,
+                        "Enter password: ",
+                        "",
+                        false
+                );
 
-            Response response;
-            if (needRegister) {
-                response = getResonse(new RegisterRequest(user, passHash));
-            } else {
-                response = getResonse(new TestRequest(user, passHash));
-            }
-            printResonse(response);
-            if (response.success) {
-                this.user = user;
-                requestFactory = new RequestFactory(user, passHash);
-                return;
+                String passHash = md2(password);
+
+                Response response;
+                if (needRegister) {
+                    response = getResonse(new RegisterRequest(user, passHash));
+                } else {
+                    response = getResonse(new TestRequest(user, passHash));
+                }
+                printResonse(response);
+                if (response.success) {
+                    this.user = user;
+                    requestFactory = new RequestFactory(user, passHash);
+                    return;
+                }
+            } catch (InterruptedException e) {
+                break;
             }
         }
     }
@@ -127,7 +134,7 @@ public class Client {
         return Optional.empty();
     }
 
-    public static <T> T readObject(Scanner scanner, boolean quiet, Function<String, T> conv, Predicate<T> isValid, String promptMessage, String errorMessage, boolean canBeEmpty) {
+    public static <T> T readObject(Scanner scanner, boolean quiet, Function<String, T> conv, Predicate<T> isValid, String promptMessage, String errorMessage, boolean canBeEmpty) throws InterruptedException {
         while (true) {
             if (!quiet) {
                 System.out.print(promptMessage);
@@ -146,137 +153,146 @@ public class Client {
                 }
                 System.out.println(errorMessage);
             } else {
-                System.exit(0);
+                throw new InterruptedException("C-d");
             }
         }
     }
 
-    private SpaceMarine readMarine(Scanner scanner, boolean quiet) {
-        System.out.println("Note: all decimal fractions are stored with limited precision and may be rounded from the value given");
+    private Optional<SpaceMarine> readMarine(Scanner scanner, boolean quiet) {
+        try {
+            System.out.println("Note: all decimal fractions are stored with limited precision and may be rounded from the value given");
 
-        Long id = null;
+            Long id = null;
 
-        String name = readObject(
-                scanner,
-                quiet,
-                s -> s,
-                s -> !s.isEmpty(),
-                "Enter name: ",
-                "name can't be empty",
-                false);
-
-        Double x = readObject(
-                scanner,
-                quiet,
-                Double::parseDouble,
-                d -> true,
-                "Enter x coordinate (decimal fraction): ",
-                "not a valid coordinate",
-                false
-        );
-
-        Double y = readObject(
-                scanner,
-                quiet,
-                Double::parseDouble,
-                d -> true,
-                "Enter y coordinate (decimal fraction): ",
-                "not a valid coordinate",
-                false
-        );
-
-        Coordinates coordinates = new Coordinates(x,y);
-
-        LocalDate date = null;
-
-        Float health = readObject(
-                scanner,
-                quiet,
-                Float::parseFloat,
-                f -> f > 0,
-                "Enter health (decimal fraction, must be >0): ",
-                "not a valid health value",
-                false
-        );
-
-        AstartesCategory category = readObject(
-                scanner,
-                quiet,
-                AstartesCategory::valueOf,
-                c -> true,
-                "Enter a category (one of [" + Arrays.stream(AstartesCategory.values())
-                        .map(AstartesCategory::toString)
-                        .collect(Collectors.joining(", ")) + "]) or leave empty: ",
-                "not a valid category",
-                true
-        );
-
-        Weapon weapon = readObject(
-                scanner,
-                quiet,
-                Weapon::valueOf,
-                w -> true,
-                "Enter a weapong type (one of [" + Arrays.stream(Weapon.values())
-                        .map(Weapon::toString)
-                        .collect(Collectors.joining(", ")) + "]): ",
-                "not a valid weapon type",
-                false
-        );
-
-        MeleeWeapon meleeWeapon = readObject(
-                scanner,
-                quiet,
-                MeleeWeapon::valueOf,
-                mw -> true,
-                "Enter a melee weapon type (one of [" + Arrays.stream(MeleeWeapon.values())
-                        .map(MeleeWeapon::toString)
-                        .collect(Collectors.joining(", ")) + "]): ",
-                "not a valid melee weapon type",
-                false
-        );
-
-        Boolean needChapter = readObject(
-                scanner,
-                quiet,
-                s -> {
-                    if (s.equals("y")) {
-                        return true;
-                    } else if (s.equals("n")) {
-                        return false;
-                    } else {
-                        throw new IllegalArgumentException();
-                    }
-                },
-                nc -> true,
-                "Do you want to add a chapter (y/n): ",
-                "enter 'y' or 'n'",
-                false
-        );
-
-        Chapter chapter = null;
-        if (needChapter) {
-            String chapterName = readObject(
+            String name = readObject(
                     scanner,
                     quiet,
-                    cn -> cn,
+                    s -> s,
                     s -> !s.isEmpty(),
-                    "Enter chapter name: ",
-                    "chapter name can't be empty",
+                    "Enter name: ",
+                    "name can't be empty",
+                    false);
+
+            Double x = readObject(
+                    scanner,
+                    quiet,
+                    Double::parseDouble,
+                    d -> true,
+                    "Enter x coordinate (decimal fraction): ",
+                    "not a valid coordinate",
                     false
             );
 
-            String world = readObject(
+            Double y = readObject(
                     scanner,
                     quiet,
-                    w -> w,
-                    w -> true,
-                    "Enter world name or leave empty: ",
-                    "",
+                    Double::parseDouble,
+                    d -> true,
+                    "Enter y coordinate (decimal fraction): ",
+                    "not a valid coordinate",
+                    false
+            );
+
+            Coordinates coordinates = new Coordinates(x, y);
+
+            LocalDate date = null;
+
+            Float health = readObject(
+                    scanner,
+                    quiet,
+                    Float::parseFloat,
+                    f -> f > 0,
+                    "Enter health (decimal fraction, must be >0): ",
+                    "not a valid health value",
+                    false
+            );
+
+            AstartesCategory category = readObject(
+                    scanner,
+                    quiet,
+                    AstartesCategory::valueOf,
+                    c -> true,
+                    "Enter a category (one of [" + Arrays.stream(AstartesCategory.values())
+                            .map(AstartesCategory::toString)
+                            .collect(Collectors.joining(", ")) + "]) or leave empty: ",
+                    "not a valid category",
                     true
             );
-            chapter = new Chapter(chapterName, world);
+
+            Weapon weapon = readObject(
+                    scanner,
+                    quiet,
+                    Weapon::valueOf,
+                    w -> true,
+                    "Enter a weapong type (one of [" + Arrays.stream(Weapon.values())
+                            .map(Weapon::toString)
+                            .collect(Collectors.joining(", ")) + "]): ",
+                    "not a valid weapon type",
+                    false
+            );
+
+            MeleeWeapon meleeWeapon = readObject(
+                    scanner,
+                    quiet,
+                    MeleeWeapon::valueOf,
+                    mw -> true,
+                    "Enter a melee weapon type (one of [" + Arrays.stream(MeleeWeapon.values())
+                            .map(MeleeWeapon::toString)
+                            .collect(Collectors.joining(", ")) + "]): ",
+                    "not a valid melee weapon type",
+                    false
+            );
+
+            Boolean needChapter = readObject(
+                    scanner,
+                    quiet,
+                    s -> {
+                        if (s.equals("y")) {
+                            return true;
+                        } else if (s.equals("n")) {
+                            return false;
+                        } else {
+                            throw new IllegalArgumentException();
+                        }
+                    },
+                    nc -> true,
+                    "Do you want to add a chapter (y/n): ",
+                    "enter 'y' or 'n'",
+                    false
+            );
+
+            Chapter chapter = null;
+            if (needChapter) {
+                String chapterName = readObject(
+                        scanner,
+                        quiet,
+                        cn -> cn,
+                        s -> !s.isEmpty(),
+                        "Enter chapter name: ",
+                        "chapter name can't be empty",
+                        false
+                );
+
+                String world = readObject(
+                        scanner,
+                        quiet,
+                        w -> w,
+                        w -> true,
+                        "Enter world name or leave empty: ",
+                        "",
+                        true
+                );
+                chapter = new Chapter(chapterName, world);
+            }
+            return Optional.of(new SpaceMarine(id, name, coordinates, date, health, category, weapon, meleeWeapon, chapter, user));
+        } catch (InterruptedException e) {
+            exit = true;
+            return Optional.empty();
         }
-        return new SpaceMarine(id, name, coordinates, date, health, category, weapon, meleeWeapon, chapter, user);
+    }
+
+    private static <U,V,T> Optional<T> twoMap(Optional<U> fst, Optional<V> snd, BiFunction<U,V,T> func) {
+        return fst.flatMap(u -> snd.map(v -> func.apply(u,v)));
     }
 
     private Optional<Command> readCommand(Scanner scanner, boolean quiet) {
@@ -311,15 +327,17 @@ public class Client {
                 } else if (command.equals("show")) {
                     return Optional.of(new ShowCommand());
                 } else if (command.equals("insert")) {
-                    return simpleSingleArg(args,
+                    Optional<Long> keyMb = simpleSingleArg(args,
                             Long::parseLong,
                             "insert",
-                            "key").map(k -> new InsertCommand(k, readMarine(scanner, quiet)));
+                            "key");
+                    return twoMap(keyMb, readMarine(scanner, quiet), InsertCommand::new);
                 } else if (command.equals("update")) {
-                    return simpleSingleArg(args,
+                    Optional<Long> idMb = simpleSingleArg(args,
                             Long::parseLong,
                             "update",
-                            "id").map(id -> new UpdateCommand(id, readMarine(scanner, quiet)));
+                            "id");
+                    return twoMap(idMb, readMarine(scanner, quiet), UpdateCommand::new);
                 } else if (command.equals("remove_key")) {
                     return simpleSingleArg(args,
                             Long::parseLong,
@@ -355,15 +373,17 @@ public class Client {
                     return Optional.empty();
                 } else if (command.equals("remove_lower")) {
                     if (simpleZeroArg(args, "remove_lower")) {
-                        return Optional.of(new RemoveLowerCommand(readMarine(scanner, quiet)));
+//                        return Optional.of(new RemoveLowerCommand(readMarine(scanner, quiet)));
+                        return readMarine(scanner, quiet).map(RemoveLowerCommand::new);
                     } else {
                         return Optional.empty();
                     }
                 } else if (command.equals("replace_if_lower")) {
-                    return simpleSingleArg(args,
+                    Optional<Long> mbKey = simpleSingleArg(args,
                             Long::parseLong,
                             "replace_if_lower",
-                            "key").map(k -> new ReplaceIfLowerCommand(k, readMarine(scanner, quiet)));
+                            "key");
+                    return twoMap(mbKey, readMarine(scanner, quiet), ReplaceIfLowerCommand::new);
                 } else if (command.equals("remove_lower_key")) {
                     return simpleSingleArg(args,
                             Long::parseLong,
@@ -376,18 +396,22 @@ public class Client {
                         System.out.println("filter_greater_than_category doesn't take any same-line arguments");
                         return Optional.empty();
                     } else {
-                        AstartesCategory category = readObject(
-                                scanner,
-                                quiet,
-                                AstartesCategory::valueOf,
-                                c -> true,
-                                "Enter category (one of [" +
-                                        Arrays.stream(AstartesCategory.values()).map(AstartesCategory::toString)
-                                                .collect(Collectors.joining(", ")) + "]): ",
-                                "invalid category",
-                                false
-                        );
-                        return Optional.of(new FilterGreaterThanCategoryCommand(category));
+                        try {
+                            AstartesCategory category = readObject(
+                                    scanner,
+                                    quiet,
+                                    AstartesCategory::valueOf,
+                                    c -> true,
+                                    "Enter category (one of [" +
+                                            Arrays.stream(AstartesCategory.values()).map(AstartesCategory::toString)
+                                                    .collect(Collectors.joining(", ")) + "]): ",
+                                    "invalid category",
+                                    false
+                            );
+                            return Optional.of(new FilterGreaterThanCategoryCommand(category));
+                        } catch (InterruptedException e) {
+                            return Optional.empty();
+                        }
                     }
                 } else if (command.equals("print_ascending")) {
                     return Optional.of(new PrintAscendingCommand());
@@ -463,6 +487,9 @@ public class Client {
         }
         while (!exit) {
             Optional<Command> mbCommand = readCommand(scanner, quiet);
+            if (exit) {
+                break;
+            }
             mbCommand.map(requestFactory::request)
                     .map(this::getResonse).ifPresent(this::printResonse);
         }
